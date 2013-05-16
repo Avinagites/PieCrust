@@ -176,8 +176,8 @@ class StupidHttp_WebServer
                 'list_directories' => true,
                 'list_root_directory' => false, 
                 'run_browser' => false,
-                'keep_alive' => false,
-                'timeout' => 4,
+                'keep_alive' => true,
+                'timeout' => 300,
                 'poll_interval' => 1,
                 'show_banner' => true,
                 'name' => null
