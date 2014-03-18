@@ -45,6 +45,15 @@ class PieCrust implements IPieCrust
     {
         return $this->debuggingEnabled;
     }
+
+    protected $themeSite;
+    /**
+     * Gets whether this app is for a theme site.
+     */
+    public function isThemeSite()
+    {
+        return $this->themeSite;
+    }
     
     protected $templatesDirs;
     /**
@@ -69,6 +78,13 @@ class PieCrust implements IPieCrust
             if (is_dir($default))
                 $this->templatesDirs[] = $default;
 
+            // Add the theme's default template directory if it exists.
+            if ($this->getThemeDir())
+            {
+                $themeDefault = $this->getThemeDir() . PieCrustDefaults::CONTENT_TEMPLATES_DIR;
+                if (is_dir($themeDefault))
+                    $this->templatesDirs[] = $themeDefault;
+            }
         }
         return $this->templatesDirs;
     }
@@ -222,7 +238,7 @@ class PieCrust implements IPieCrust
         {
             $this->themeDir = $this->rootDir . PieCrustDefaults::CONTENT_THEME_DIR;
             if (!is_dir($this->themeDir))
-                $this->themeDir = false;
+                $this->themeDir = PieCrustDefaults::RES_DIR() . 'theme/';
         }
         return $this->themeDir;
     }
@@ -319,7 +335,8 @@ class PieCrust implements IPieCrust
                 'root' => null,
                 'cache' => true,
                 'debug' => false,
-                'environment' => null
+                'environment' => null,
+                'theme_site' => false
             ),
             $parameters
         );
@@ -330,6 +347,7 @@ class PieCrust implements IPieCrust
         $this->rootDir = rtrim($parameters['root'], '/\\') . '/';
         $this->debuggingEnabled = (bool)$parameters['debug'];
         $this->cachingEnabled = (bool)$parameters['cache'];
+        $this->themeSite = (bool)$parameters['theme_site'];
         $this->pluginLoader = new PluginLoader($this);
 
         $this->environment = $parameters['environment'];
@@ -348,18 +366,26 @@ class PieCrust implements IPieCrust
             $configCache = $this->cachingEnabled ? $this->getCacheDir() : false;
 
             $configPaths = array();
-            $themeDir = $this->getThemeDir();
-            if ($themeDir !== false)
-                $configPaths[] = $themeDir . PieCrustDefaults::THEME_CONFIG_PATH;
-            $configPaths[] = $this->rootDir . PieCrustDefaults::CONFIG_PATH;
+            if ($this->isThemeSite())
+            {
+                $themeDir = false;
+                $configPaths[] = $this->rootDir . PieCrustDefaults::THEME_CONFIG_PATH;
+            }
+            else
+            {
+                $themeDir = $this->getThemeDir();
+                if ($themeDir !== false)
+                    $configPaths[] = $themeDir . PieCrustDefaults::THEME_CONFIG_PATH;
+                $configPaths[] = $this->rootDir . PieCrustDefaults::CONFIG_PATH;
+            }
 
             $this->config = new PieCrustConfiguration($configPaths, $configCache);
             if ($themeDir !== false)
             {
                 // We'll need to patch the templates directories to be relative
                 // to the site's root, as opposed to the theme root.
-                $relativeThemeDir = PieCrustHelper::getRelativePath($this, $themeDir);
-                $this->config->setFixup(function ($i, &$c) use ($relativeThemeDir) {
+                $relativeThemeDir = PathHelper::getRelativePath($this->rootDir, $themeDir);
+                $this->config->addFixup(function ($i, &$c) use ($relativeThemeDir) {
                     if ($i == 0)
                     {
                         if (!isset($c['site']))

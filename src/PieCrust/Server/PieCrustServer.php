@@ -46,9 +46,12 @@ class PieCrustServer
                 'address' => 'localhost',
                 'mime_types' => array('less' => 'text/css'),
                 'log_file' => null,
+                'debug_server' => false,
+                'keep_alive' => false,
                 'debug' => false,
                 'config_variant' => null,
-                'cache' => true
+                'cache' => true,
+                'theme_site' => false
             ),
             $options
         );
@@ -65,7 +68,8 @@ class PieCrustServer
         {
             $pieCrust = new PieCrust(array(
                 'root' => $this->rootDir,
-                'cache' => true
+                'cache' => true,
+                'theme_site' => $this->options['theme_site']
             ));
             $this->bakeCacheDir = $pieCrust->getCacheDir() . 'server_cache';
         }
@@ -157,7 +161,8 @@ class PieCrustServer
                 array(
                     'root' => $this->rootDir,
                     'debug' => $this->options['debug'],
-                    'cache' => $this->options['cache']
+                    'cache' => $this->options['cache'],
+                    'theme_site' => $this->options['theme_site']
                 ),
                 $context->getRequest()->getServerVariables()
             );
@@ -167,19 +172,27 @@ class PieCrustServer
             $pieCrust->getConfig()->setValue('site/cache_time', false);
             $pieCrust->getConfig()->setValue('server/is_hosting', true);
 
-            // Apply the specified configuration variant, if any. Otherwise,
-            // use the default variant.
-            $isDefault = false;
+            // New way: apply the `server` variant.
+            // Old way: apply the specified variant, or the default one. Warn about deprecation.
             $variantName = $this->options['config_variant'];
-            if (!$variantName)
+            if ($variantName)
             {
-                $isDefault = true;
-                $variantName = 'default';
+                $this->logger->warning("The `--config` parameter has been moved to a global parameter (specified before the command).");
+                $pieCrust->getConfig()->applyVariant("server/config_variants/{$variantName}");
+                $this->logger->warning("Variant '{$variantName}' has been applied, but will need to be moved to the new `variants` section of the site configuration.");
             }
-            $pieCrust->getConfig()->applyVariant(
-                "server/config_variants/{$variantName}",
-                !$isDefault
-            );
+            else
+            {
+                if ($pieCrust->getConfig()->hasValue("server/config_variants/default"))
+                {
+                    $pieCrust->getConfig()->applyVariant("server/config_variants/default");
+                    $this->logger->warning("The default server configuration variant has been applied, but will need to be moved into the new `variants/server` section of the site configuration.");
+                }
+                else
+                {
+                    $pieCrust->getConfig()->applyVariant("variants/server", false);
+                }
+            }
         }
         catch (Exception $e)
         {
@@ -256,12 +269,7 @@ class PieCrustServer
         $context->getLog()->debug("Ran PieCrust request in " . $timeSpan * 1000 . "ms.");
         if ($pieCrustException != null)
         {
-            $e = $pieCrustException;
-            while ($e != null)
-            {
-                $context->getLog()->error($e->getMessage());
-                $e = $e->getPrevious();
-            }
+            $this->logger->exception($pieCrustException, true);
         }
     }
 
@@ -278,13 +286,16 @@ class PieCrustServer
         {
             $this->server->setLog(StupidHttp_PearLog::fromSingleton('file', $this->options['log_file']));
         }
-        elseif ($this->logger != null && !($this->logger instanceof \Log_null))
+        elseif (!$this->options['debug_server'] && $this->logger != null && !($this->logger instanceof \Log_null))
         {
             $this->server->setLog(new StupidHttp_PearLog($this->logger));
         }
         else
         {
-            $this->server->setLog(new StupidHttp_ConsoleLog(StupidHttp_Log::TYPE_INFO));
+            $level = StupidHttp_Log::TYPE_INFO;
+            if ($this->options['debug_server'])
+                $level = StupidHttp_Log::TYPE_DEBUG;
+            $this->server->setLog(new StupidHttp_ConsoleLog($level));
         }
 
         // Use colorized output on Mac/Linux.
@@ -321,7 +332,8 @@ class PieCrustServer
         $pieCrust = new PieCrust(
             array(
                 'root' => $this->rootDir,
-                'cache' => $this->options['cache']
+                'cache' => $this->options['cache'],
+                'theme_site' => $this->options['theme_site']
             ),
             $server
         );

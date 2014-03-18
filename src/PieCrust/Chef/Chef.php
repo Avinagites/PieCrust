@@ -34,8 +34,39 @@ class Chef
         catch (Exception $e)
         {
             echo "Fatal Error: " . $e->getMessage() . PHP_EOL;
-            echo $e->getFile() . ":" . $e->getLine() . PHP_EOL;
-            echo $e->getTraceAsString() . PHP_EOL;
+
+            // Do some poor man's parsing, because at this point, anything
+            // could be fucked up.
+            if (!$userArgv)
+            {
+                $userArgv = $_SERVER['argv'];
+            }
+            if (in_array('--debug', $userArgv))
+            {
+                echo $e->getFile() . ":" . $e->getLine() . PHP_EOL;
+                echo $e->getTraceAsString() . PHP_EOL;
+                $e = $e->getPrevious();
+                while ($e)
+                {
+                    echo PHP_EOL;
+                    echo $e->getMessage() . PHP_EOL;
+                    echo $e->getFile() . ":" . $e->getLine() . PHP_EOL;
+                    echo $e->getTraceAsString() . PHP_EOL;
+                    $e = $e->getPrevious();
+                }
+            }
+            else
+            {
+                echo PHP_EOL;
+                echo "More error details follow:" . PHP_EOL;
+                $e = $e->getPrevious();
+                while ($e)
+                {
+                    echo PHP_EOL;
+                    echo $e->getMessage() . PHP_EOL;
+                    $e = $e->getPrevious();
+                }
+            }
             return 2;
         }
     }
@@ -57,25 +88,54 @@ class Chef
             $userArgc = count($userArgv);
         }
 
-        // Find whether the '--root' parameter was given.
+        // Find if whether the `--root` or `--config` parameters were given.
         $rootDir = null;
-        foreach ($userArgv as $arg)
+        $isThemeSite = false;
+        $configVariant = null;
+        for ($i = 1; $i < count($userArgv); ++$i)
         {
+            $arg = $userArgv[$i];
+
             if (substr($arg, 0, strlen('--root=')) == '--root=')
             {
                 $rootDir = substr($arg, strlen('--root='));
+                if (substr($rootDir, 0, 1) == '~')
+                    $rootDir = getenv("HOME") . substr($rootDir, 1);
+            }
+            elseif ($arg == '--root')
+            {
+                $rootDir = $userArgv[$i + 1];
+                ++$i;
+            }
+            elseif (substr($arg, 0, strlen('--config=')) == '--config=')
+            {
+                $configVariant = substr($arg, strlen('--config='));
+            }
+            elseif ($arg == '--config')
+            {
+                $configVariant = $userArgv[$i + 1];
+                ++$i;
+            }
+            elseif ($arg == '--theme')
+            {
+                $isThemeSite = true;
+            }
+            else if ($arg[0] != '-')
+            {
+                // End of the global arguments sections. This is
+                // the command name.
                 break;
             }
         }
         if ($rootDir == null)
         {
             // No root given. Find it ourselves.
-            $rootDir = PathHelper::getAppRootDir(getcwd());
+            $rootDir = PathHelper::getAppRootDir(getcwd(), $isThemeSite);
         }
         else
         {
             // The root was given.
-            $rootDir = PathHelper::getAbsolutePath($rootDir);
+            $rootDir = trim($rootDir, " \"");
             if (!is_dir($rootDir))
                 throw new PieCrustException("The given root directory doesn't exist: " . $rootDir);
         }
@@ -91,8 +151,20 @@ class Chef
             $pieCrust = new PieCrust(array(
                 'root' => $rootDir,
                 'cache' => !in_array('--no-cache', $userArgv),
-                'environment' => $environment
+                'environment' => $environment,
+                'theme_site' => $isThemeSite
             ));
+        }
+
+        // Pre-load the correct config variant if any was specified.
+        if ($configVariant != null)
+        {
+            // You can't apply a config variant if there's no website.
+            if ($rootDir == null)
+                throw new PieCrustException("No PieCrust website in '{$cwd}' ('_content/config.yml' not found!).");
+
+            $configVariant = trim($configVariant, " \"");
+            $pieCrust->getConfig()->applyVariant('variants/' . $configVariant);
         }
 
         // Set up the command line parser.
@@ -101,10 +173,13 @@ class Chef
             'description' => 'The PieCrust chef manages your website.',
             'version' => PieCrustDefaults::VERSION
         ));
+        $parser->renderer = new ChefCommandLineRenderer($parser);
         $this->addCommonOptionsAndArguments($parser);
         // Sort commands by name.
         $sortedCommands = $pieCrust->getPluginLoader()->getCommands();
-        usort($sortedCommands, function ($c1, $c2) { return strcmp($c1->getName(), $c2->getName()); });
+        usort($sortedCommands, function ($com1, $com2) {
+            return strcmp($com1->getName(), $com2->getName());
+        });
         // Add commands to the parser.
         foreach ($sortedCommands as $command)
         {
@@ -120,7 +195,7 @@ class Chef
         catch (Exception $e)
         {
             $parser->displayError($e->getMessage(), false);
-            return 1;
+            return 3;
         }
 
         // If no command was given, use `help`.
@@ -137,19 +212,19 @@ class Chef
             $parser->displayError("You can't specify both --debug and --quiet.", false);
             return 1;
         }
-        $log = new ChefLog('Chef', '', array('lineFormat' => '%{message}'));
+        $log = new ChefLog('Chef');
+        // Log to a file.
+        if ($result->options['log'])
+        {
+            $log->addFileLog($result->options['log']);
+        }
         // Make the log available to PieCrust.
         if ($rootDir != null)
+        {
             $environment->setLog($log);
+        }
         // Make the log available for debugging purposes.
         $GLOBALS['__CHEF_LOG'] = $log;
-
-        // Handle deprecated stuff.
-        if ($result->options['no_cache_old'])
-        {
-            $log->warning("The `--nocache` option has been renamed `--no-cache`.");
-            $result->options['no_cache'] = true;
-        }
 
         // Run the command.
         foreach ($pieCrust->getPluginLoader()->getCommands() as $command)
@@ -180,37 +255,9 @@ class Chef
                 }
                 catch (Exception $e)
                 {
-                    $this->logException($log, $e, $debugMode);
+                    $log->exception($e, $debugMode);
                     return 1;
                 }
-            }
-        }
-    }
-
-    protected function logException($log, $e, $debugMode = false)
-    {
-        if ($debugMode)
-        {
-            $log->emerg($e->getMessage());
-            $log->debug($e->getTraceAsString());
-            $e = $e->getPrevious();
-            while ($e)
-            {
-                $log->err("-----------------");
-                $log->err($e->getMessage());
-                $log->debug($e->getTraceAsString());
-                $e = $e->getPrevious();
-            }
-            $log->err("-----------------");
-        }
-        else
-        {
-            $log->emerg($e->getMessage());
-            $e = $e->getPrevious();
-            while ($e)
-            {
-                $log->err($e->getMessage());
-                $e = $e->getPrevious();
             }
         }
     }
@@ -223,6 +270,18 @@ class Chef
             'default'     => null,
             'help_name'   => 'ROOT_DIR'
         ));
+        $parser->addOption('config_variant', array(
+            'long_name'   => '--config',
+            'description' => "The configuration variant to use for this command.",
+            'default'     => null,
+            'help_name'   => 'VARIANT'
+        ));
+        $parser->addOption('theme_site', array(
+            'long_name'   => '--theme',
+            'description' => "Treat a theme like a website.",
+            'default'     => false,
+            'action'      => 'StoreTrue'
+        ));
         $parser->addOption('debug', array(
             'long_name'   => '--debug',
             'description' => "Show debug information.",
@@ -234,7 +293,6 @@ class Chef
             'long_name'   => '--no-cache',
             'description' => "When applicable, disable caching.",
             'default'     => false,
-            'help_name'   => 'NOCACHE',
             'action'      => 'StoreTrue'
         ));
         $parser->addOption('quiet', array(
@@ -244,14 +302,11 @@ class Chef
             'help_name'   => 'QUIET',
             'action'      => 'StoreTrue'
         ));
-
-        // Deprecated stuff.
-        $parser->addOption('no_cache_old', array(
-            'long_name'   => '--nocache',
-            'description' => "Deprecated. Use `--no-cache`.",
-            'default'     => false,
-            'help_name'   => 'NOCACHE',
-            'action'      => 'StoreTrue'
+        $parser->addOption('log', array(
+            'long_name'   => '--log',
+            'description' => "Send log messages to the specified file.",
+            'default'     => null,
+            'help_name'   => 'LOG_FILE'
         ));
     }
 }

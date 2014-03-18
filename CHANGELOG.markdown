@@ -15,13 +15,139 @@ development branch (the development branch is ahead of the stable branch).
 Fresh changes
 -------------
 
-* NEW: Handle files with BOM headers.
-* BUG: Fixed crash in Jekyll importer.
-* BUG: Fixed a bug with baking tag pages with sub-pages when the tag has special
-  or unicode characters.
+* CHANGED: The `chef` bootstrap script on Mac/Linux won't try to find your
+  PHP installation anymore.
+* NEW: Ability to sort pages returned by `site.pages`.
+* NEW: Added support for PHP-Sundown.
+* MISC: Optimizations for incremental baking.
+
 
 Frozen changes
 --------------
+
+### 1.1.3 (2013-01-01)
+
+* NEW: Added global `--theme` option to `chef` to treat a PieCrust theme like
+  a website. This lets the user run things like `chef serve` directly on a
+  theme.
+* BUG: Fixed incorrect sorting of blog posts published on the same day.
+* MISC: Happy new year!
+
+### 1.1.2 (2013-10-31)
+
+* BUG: The baker was incorrectly deleting files from the output directory during
+  incremental bakes.
+* BUG: The `theme_info.yml` file was incorrectly deployed to the output bake
+  folder.
+
+### 1.1.1 (2013-10-28)
+
+* BUG: Fixed a bug where posts written on the same day would not be ordered
+  correctly.
+
+### 1.1.0 (2013-10-26)
+
+* BREAKING CHANGE: Removed all options and features that were marked as
+  deprecated (_i.e._ they previously triggered a warning message).
+* CHANGE: Removed the sample website (it's being turned into a theme).
+* CHANGE: Added `.md` and `.textile` as default auto-format extensions
+  (respectively for Markdown and Textile formatting).
+* CHANGE: The `sortBy` function on page and post iterators has been renamed to
+  just `sort`.
+* CHANGE: You can now specify the website's root for `chef` by using either
+  `--root=/path/to/root` or `--root /path/to/root`.
+* CHANGE: You can now specify configuration variants to apply for `chef` by
+  using `--config=variant` or `--config variant`. Configuration variants are
+  found in the `variants` section of the site configuration. The `bake` and
+  `serve` commands will apply variants `variants/server` and `variants/baker`,
+  respectively, if found.
+* CHANGE: As a result of the previous change, you will get a warning if you use
+  the old `--config` option on those commands, or if the old
+  `baker/config_variants/default` or `server/config_variants/default`
+  variants are found. It should all work as before, however, except for the
+  added warning.
+* CHANGE: For multi-blogs, a post will try to get its layout from the
+  `<blogname>/post` template first, and then the global default `post` template
+  if it doesn't exist.
+* NEW: Added `selfupdate` command to update an installed (Phar) version of
+  PieCrust.
+* NEW: Added support for tags when importing content from a Wordpress SQL
+  database.
+* NEW: Page and post iterators can be filtered with "magic" functions like
+  `is_foo('value')` or `has_bar('value')`, to prevent having to write a
+  full-blown filter in the page config header.
+* NEW: Ability to override the default page or post layout when import a blog
+  from Wordpress.
+* NEW: Added `pccache` tag to Twig for caching parts of markup during the bake.
+* NEW: You can pass a parameter to `all_page_numbers` to limit the number of
+  page numbers you get back.
+* NEW: Ability to specify an overall `class` and/or `id` for Geshi blocks
+  (syntax highlighting).
+* NEW: Added the `IBakerAssistant` API for plugins that want to do extra
+  processing during the bake.
+* NEW: Added the `IDataProvider` API for plugins that want to expose custom
+  template data to pages.
+* NEW: File-systems (`flat`, etc.) are now extensible through plugins, and
+  several of them can be combined by using comma-separated names in the
+  `site/posts_fs` configuration setting.
+* NEW: Added `--log` option to log `chef` output to a file.
+* NEW: Added `dropbox` file-system.
+* NEW: Added support for setting parameters on the Markdown formatter.
+* NEW: Added access to the `assets` from the pagination data, or any other page
+  object from a page iterator.
+* BUG: Fixed an issue with encoding when importing content from a Wordpress SQL
+  database.
+* BUG: Fixed an issue with the `geshi` node in Twig adding extra empty lines.
+* BUG: Fixed a bug with sorting siblings/family pages with a sub-property.
+* BUG: Baking a website will now delete files from a previous bake that are not
+  valid anymore. This fix required a pretty big refactor of the baking process,
+  so it may itself introduce a few other bugs :)
+* BUG: When `lowercase` is part of the slufigy flags (which is the case by
+  default), PieCrust now correctly matches tags/categories in the URL regardless
+  of the casing.
+* BUG: Don't copy special directories like `.hg` or `.git` when installing
+  plugins from a file-system source.
+* IMPLEMENTATION CHANGES: Did some optimizations to make memory footprint more
+  stable during a bake. Also removed PHP's default memory limit when running
+  PieCrust with `chef`.
+
+### 1.0.3 (2013-09-02)
+
+* BUG: Fixed some problems, under some versions of PHP, with baking multi-tags.
+* BUG: Skip page files that end with `~`.
+
+### 1.0.2 (2013-06-13)
+
+* BUG: Fixed a bug with the `pagination` object returning empty `next_post` and
+  `prev_post` if the current post is not part of the latest posts.
+
+### 1.0.1 (2013-06-13)
+
+* BUG: Fixed a bug with the `pagination` object returning the wrong values for
+  `total_post_count`, `total_page_count` and `all_page_numbers`.
+
+### 1.0.0 (2013-06-03)
+
+* BUG: Fixed missing new line after a Geshi node.
+* BUG: Fixed crash in Geshi with "Go" language.
+
+### 1.0.0-rc4 (2013-05-31)
+
+* ADDED: Ability to enable `keep-alive` in StupidHttp for `chef serve`. This
+  seems to fix some occasional problems.
+* BUG: Fixed the install script that wasn't making the `chef` bootstrap
+  executable.
+* BUG: Fixed a bug in the `flat` file-system that was matching incorrect post
+  files.
+* BUG: Make sure the debug window doesn't inherit text variant properties.
+
+### 1.0.0-rc3 (2013-05-19)
+
+* BUG: Handle files with BOM headers.
+* BUG: Fixed crash in Jekyll importer.
+* BUG: Fixed a bug with baking tag pages with sub-pages when the tag has special
+  or unicode characters.
+* BUG: Fixed a problem with having multiple post loops on a single page.
 
 ### 1.0.0-rc2 (2013-04-24)
 
@@ -35,8 +161,8 @@ Frozen changes
 * BREAKING CHANGE: The `pagination.posts` iterator now prevents the user from
   modifying it, which could otherwise result in confusing behaviour.
 * BREAKING CHANGE: Global `chef` options like `--root`, `--debug` or `--quiet`
-  are not really global, and must be specified before the command name.
-* BREAKING BUG FIX: Monthly blog archives were incorrectly order
+  are now really global, and must be specified before the command name.
+* BREAKING BUG FIX: Monthly blog archives were incorrectly ordered
   chronologically, instead of reverse-chronologically.
 * NEW: Added `prepare feed` command to create RSS/Atom feeds.
 * NEW: Added `plugins update` command to update installed plugins. For now, this

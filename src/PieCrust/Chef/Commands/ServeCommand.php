@@ -50,6 +50,18 @@ class ServeCommand extends ChefCommand
             'default'     => null,
             'help_name'   => 'LOG_FILE'
         ));
+        $serverParser->addOption('debug_server', array(
+            'long_name'   => '--debug-server',
+            'description' => "Print debug information only for the web server.",
+            'default'     => false,
+            'action'      => 'StoreTrue'
+        ));
+        $serverParser->addOption('keep_alive', array(
+            'long_name'   => '--keep-alive',
+            'description' => "Support 'keep-alive' connections.",
+            'default'     => false,
+            'action'      => 'StoreTrue'
+        ));
         $serverParser->addOption('config_variant', array(
             'short_name'  => '-c',
             'long_name'   => '--config',
@@ -57,33 +69,21 @@ class ServeCommand extends ChefCommand
             'default'     => null,
             'help_name'   => 'VARIANT'
         ));
-
-        // Deprecated stuff.
-        $serverParser->addOption('run_browser_old', array(
-            'long_name'   => '--nobrowser',
-            'description' => "Deprecated. Same as `--no-browser`.",
-            'default'     => false,
-            'action'      => 'StoreTrue'
-        ));
     }
 
     public function run(ChefContext $context)
     {
         $result = $context->getResult();
 
-        // Warn about deprecated stuff.
-        if ($result->command->options['run_browser_old'])
-        {
-            $context->getLog()->warning("The `--nobrowser` option has been renamed to `--no-browser`.");
-            $result->command->options['run_browser'] = false;
-        }
-
         $rootDir = $context->getApp()->getRootDir();
         $port = intval($result->command->options['port']);
         $address = $result->command->options['address'];
         $runBrowser = $result->command->options['run_browser'];
         $logFile = $result->command->options['log_file'];
+        $debugServer = $result->command->options['debug_server'];
+        $keepAlive = $result->command->options['keep_alive'];
         $configVariant = $result->command->options['config_variant'];
+        $isThemeSite = $result->options['theme_site'];
         $nocache = $result->options['no_cache'];
         $debug = $result->options['debug'];
 
@@ -93,13 +93,16 @@ class ServeCommand extends ChefCommand
                 'port' => $port,
                 'address' => $address,
                 'log_file' => $logFile,
+                'debug_server' => $debugServer,
                 'debug' => $debug,
                 'cache' => !$nocache,
-                'config_variant' => $configVariant
+                'config_variant' => $configVariant,
+                'theme_site' => $isThemeSite
             ),
             $context->getLog());
         $server->run(array(
             'list_directories' => false,
+            'keep_alive' => $keepAlive,
             'run_browser' => $runBrowser
         ));
     }

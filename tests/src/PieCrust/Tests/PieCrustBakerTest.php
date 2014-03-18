@@ -10,6 +10,40 @@ use PieCrust\Util\UriBuilder;
 
 class PieCrustBakerTest extends PieCrustTestCase
 {
+    public function testEmptyBake()
+    {
+        $fs = MockFileSystem::create();
+
+        $this->assertFalse(is_dir($fs->url('kitchen/_counter')));
+        $app = $fs->getApp(array('cache' => false));
+        $baker = new PieCrustBaker($app);
+        $baker->bake();
+
+        $structure = $fs->getStructure();
+        $counter = $structure[$fs->getRootName()]['kitchen']['_counter'];
+        $this->assertEquals(
+            array('index.html'),
+            $this->getVfsEntries($counter)
+        );
+    }
+
+    public function testSimpleBake()
+    {
+        $fs = MockFileSystem::create()
+            ->withPost('post1', 1, 1, 2010, array(), 'POST ONE')
+            ->withPage('foo', array(), "Something");
+        $app = $fs->getApp(array('cache' => false));
+        $baker = new PieCrustBaker($app);
+        $baker->bake();
+
+        $structure = $fs->getStructure();
+        $counter = $structure[$fs->getRootName()]['kitchen']['_counter'];
+        $this->assertEquals(
+            array('2010', 'index.html', 'foo.html'),
+            $this->getVfsEntries($counter)
+        );
+    }
+
     public function testPostsWithOverridenDates()
     {
         $fs = MockFileSystem::create();
@@ -63,7 +97,7 @@ EOD;
         $fs->withPost(
             'second-post', 1, 1, 2011,
             array('format' => 'none', 'tags' => array('blah')),
-            'Second post: {{ asset.bar }}');
+            'Second post: {{ assets.bar }}');
         $fs->withAsset('_content/posts/2011-01-01_second-post-assets/bar.jpg', 'BAR');
         $fs->withPost(
             'third-post', 1, 1, 2012,
@@ -113,30 +147,37 @@ EOD;
 EOD;
 
         $fs = MockFileSystem::create();
+        $fs->withConfig(array('site' => array('default_format' => 'none')));
         $fs->withTemplate('default', '');
+        $fs->withTemplate('post', <<<EOD
+{{content|raw}}
+Prev: {{pagination.prev_post.url}}
+Next: {{pagination.next_post.url}}
+EOD
+        );
         $fs->withPage(
             'foo',
-            array('layout' => 'none', 'format' => 'none'),
+            array('layout' => 'none'),
             $indexContents);
         $fs->withPost(
             'before-post', 2, 1, 2012,
-            array('layout' => 'none', 'format' => 'none'),
+            array(),
             'Before...');
         $fs->withPost(
             'z-first-post', 4, 1, 2012,
-            array('layout' => 'none', 'format' => 'none', 'time' => '08:50'),
+            array('time' => '08:50'),
             'First post.');
         $fs->withPost(
             'a-second-post', 4, 1, 2012,
-            array('layout' => 'none', 'format' => 'none', 'time' => '12:30'),
+            array('time' => '12:30'),
             'Second post.');
         $fs->withPost(
             'b-third-post', 4, 1, 2012,
-            array('layout' => 'none', 'format' => 'none', 'time' => '17:05:32'),
+            array('time' => '17:05'),
             'Third post.');
         $fs->withPost(
             'after-post', 12, 1, 2012,
-            array('layout' => 'none', 'format' => 'none'),
+            array(),
             'After...');
 
         $app = new PieCrust(array(
@@ -151,6 +192,27 @@ EOD;
         $this->assertEquals(
             "After...\nThird post.\nSecond post.\nFirst post.\nBefore...\n",
             file_get_contents($fs->url('kitchen/_counter/foo.html'))
+        );
+
+        $this->assertEquals(
+            "Before...\nPrev: \nNext: /2012/01/04/z-first-post.html",
+            file_get_contents($fs->url('kitchen/_counter/2012/01/02/before-post.html'))
+        );
+        $this->assertEquals(
+            "First post.\nPrev: /2012/01/02/before-post.html\nNext: /2012/01/04/a-second-post.html",
+            file_get_contents($fs->url('kitchen/_counter/2012/01/04/z-first-post.html'))
+        );
+        $this->assertEquals(
+            "Second post.\nPrev: /2012/01/04/z-first-post.html\nNext: /2012/01/04/b-third-post.html",
+            file_get_contents($fs->url('kitchen/_counter/2012/01/04/a-second-post.html'))
+        );
+        $this->assertEquals(
+            "Third post.\nPrev: /2012/01/04/a-second-post.html\nNext: /2012/01/12/after-post.html",
+            file_get_contents($fs->url('kitchen/_counter/2012/01/04/b-third-post.html'))
+        );
+        $this->assertEquals(
+            "After...\nPrev: /2012/01/04/b-third-post.html\nNext: ",
+            file_get_contents($fs->url('kitchen/_counter/2012/01/12/after-post.html'))
         );
     }
 
@@ -368,116 +430,6 @@ EOD
         $this->assertEquals(
             $expectedContents,
             file_get_contents($fs->url('kitchen/_counter/' . $fileName))
-        );
-    }
-
-    public function testUrlWithMultipleBlogs()
-    {
-        $fs = MockFileSystem::create()
-            ->withConfig(array(
-                'site' => array('blogs' => array('one', 'two')),
-                'two' => array('tag_url' => 'tagged/%tag%')
-            ))
-            ->withTemplate('default', '')
-            ->withTemplate('post', '{{content|raw}}')
-            ->withPage(
-                'normal',
-                array('layout' => 'none', 'format' => 'none'),
-                <<<'EOD'
-{{pctagurl('foo')}}
-{{pctagurl('foo', 'one')}}
-{{pctagurl('bar', 'two')}}
-EOD
-            )
-            ->withPage(
-                'second',
-                array('layout' => 'none', 'format' => 'none', 'blog' => 'two'),
-                <<<'EOD'
-{{pctagurl('foo')}}
-{{pctagurl('foo', 'one')}}
-{{pctagurl('bar', 'two')}}
-EOD
-            )
-            ->withPost('post1', 1, 1, 2012, array('format' => 'none'), "POST ONE {{pctagurl('foo')}}", 'one')
-            ->withPost('post2', 1, 1, 2012, array('format' => 'none'), "POST TWO {{pctagurl('bar')}}", 'two');
-
-        $app = $fs->getApp();
-        $baker = new PieCrustBaker($app);
-        $baker->bake();
-
-        $this->assertEquals(
-            "/one/tag/foo.html\n/one/tag/foo.html\n/tagged/bar.html",
-            file_get_contents($fs->url('kitchen/_counter/normal.html'))
-        );
-        $this->assertEquals(
-            "/tagged/foo.html\n/one/tag/foo.html\n/tagged/bar.html",
-            file_get_contents($fs->url('kitchen/_counter/second.html'))
-        );
-        $this->assertEquals(
-            "POST ONE /one/tag/foo.html",
-            file_get_contents($fs->url('kitchen/_counter/one/2012/01/01/post1.html'))
-        );
-        $this->assertEquals(
-            "POST TWO /tagged/bar.html",
-            file_get_contents($fs->url('kitchen/_counter/two/2012/01/01/post2.html'))
-        );
-    }
-
-    public function testUrlInTemplateWithMultipleBlogs()
-    {
-        $fs = MockFileSystem::create()
-            ->withConfig(array(
-                'site' => array('blogs' => array('one', 'two')),
-                'two' => array('tag_url' => 'tagged/%tag%')
-            ))
-            ->withTemplate('default', "{{content|raw}}\nTPL:{{pctagurl('foo')}}")
-            ->withTemplate('post', "{{content|raw}}\nTPL:{{pctagurl('bar')}}")
-            ->withPage(
-                'normal',
-                array('format' => 'none'),
-                <<<'EOD'
-{% for post in one.posts %}
-{{post.content|raw}}
-{% endfor %}
-{% for post in two.posts %}
-{{post.content|raw}}
-{% endfor %}
-EOD
-            )
-            ->withPage(
-                'second',
-                array('format' => 'none', 'blog' => 'two'),
-                <<<'EOD'
-{% for post in one.posts %}
-{{post.content|raw}}
-{% endfor %}
-{% for post in two.posts %}
-{{post.content|raw}}
-{% endfor %}
-EOD
-            )
-            ->withPost('post1', 1, 1, 2012, array('format' => 'none'), "POST ONE {{pctagurl('foo')}}", 'one')
-            ->withPost('post2', 1, 1, 2012, array('format' => 'none'), "POST TWO {{pctagurl('bar')}}", 'two');
-
-        $app = $fs->getApp();
-        $baker = new PieCrustBaker($app);
-        $baker->bake();
-
-        $this->assertEquals(
-            "POST ONE /one/tag/foo.html\nPOST TWO /tagged/bar.html\n\nTPL:/one/tag/foo.html",
-            file_get_contents($fs->url('kitchen/_counter/normal.html'))
-        );
-        $this->assertEquals(
-            "POST ONE /one/tag/foo.html\nPOST TWO /tagged/bar.html\n\nTPL:/tagged/foo.html",
-            file_get_contents($fs->url('kitchen/_counter/second.html'))
-        );
-        $this->assertEquals(
-            "POST ONE /one/tag/foo.html\nTPL:/one/tag/bar.html",
-            file_get_contents($fs->url('kitchen/_counter/one/2012/01/01/post1.html'))
-        );
-        $this->assertEquals(
-            "POST TWO /tagged/bar.html\nTPL:/tagged/bar.html",
-            file_get_contents($fs->url('kitchen/_counter/two/2012/01/01/post2.html'))
         );
     }
 
@@ -803,6 +755,65 @@ EOD
         );
     }
 
+    public function testBakeMultiLoopPage()
+    {
+        $fs = MockFileSystem::create()
+            ->withConfig(array('site' => array('default_format' => 'none')))
+            ->withTemplate('default', '{{content|raw}}')
+            ->withTemplate('post', '{{content|raw}}')
+            ->withPost('post1', 1, 1, 2010, array('category' => 'news'), 'NEWS: POST ONE')
+            ->withPost('post2', 5, 2, 2010, array('category' => 'misc'), 'MISC: POST ONE')
+            ->withPost('post3', 10, 3, 2010, array('category' => 'news'), 'NEWS: POST TWO')
+            ->withPost('post4', 1, 1, 2011, array('category' => 'product'), 'PRODUCT ONE')
+            ->withPost('post5', 5, 2, 2011, array('category' => 'news'), 'NEWS: POST THREE')
+            ->withPost('post6', 10, 3, 2011, array('category' => 'news'), 'NEWS: POST FOUR')
+            ->withPost('post7', 15, 3, 2011, array('category' => 'misc'), 'MISC: POST TWO')
+            ->withPost('post8', 1, 1, 2012, array('category' => 'product'), 'PRODUCT TWO')
+            ->withPost('post9', 5, 2, 2012, array('category' => 'product'), 'PRODUCT THREE')
+            ->withPost('post10', 1, 1, 2013, array('category' => 'news'), 'NEWS: POST FIVE')
+            ->withPage('foo', array(), <<<EOD
+NEWS:
+{% for p in blog.posts.in_category('news').limit(3) %}
+{{p.content}}
+{% endfor %}
+MISC:
+{% for p in blog.posts.in_category('misc').limit(3) %}
+{{p.content}}
+{% endfor %}
+PRODUCTS:
+{% for p in blog.posts.in_category('product').limit(3) %}
+{{p.content}}
+{% endfor %}
+EOD
+            );
+
+        $app = $fs->getApp();
+        $baker = new PieCrustBaker($app);
+        $baker->setBakeDir($fs->url('counter'));
+        $baker->bake();
+
+        $expected = <<<EOD
+NEWS:
+NEWS: POST FIVE
+NEWS: POST FOUR
+NEWS: POST THREE
+MISC:
+MISC: POST TWO
+MISC: POST ONE
+PRODUCTS:
+PRODUCT THREE
+PRODUCT TWO
+PRODUCT ONE
+
+EOD
+        ;
+
+        $this->assertEquals(
+            $expected,
+            file_get_contents($fs->url('counter/foo.html'))
+        );
+    }
+
     public function testBakeBlogArchive()
     {
         $fs = MockFileSystem::create()
@@ -1054,6 +1065,122 @@ EOD
             "one + two\nPOST TEN\nPOST SEVEN\nPOST FIVE\n",
             file_get_contents($fs->url('counter/tag/one/two.html'))
         );
+    }
+
+    public function testPageDeletion()
+    {
+        $fs = MockFileSystem::create()
+            ->withPage('foo', array(), "Foo")
+            ->withPage('bar', array(), "Bar");
+
+        $app = $fs->getApp();
+        $baker = new PieCrustBaker($app);
+        $baker->setBakeDir($fs->url('counter'));
+        $baker->bake();
+
+        $structure = $fs->getStructure();
+        $counter = $structure[$fs->getRootName()]['counter'];
+        $this->assertEquals(
+            array('index.html', 'foo.html', 'bar.html'),
+            $this->getVfsEntries($counter)
+        );
+
+        unlink($fs->url('kitchen/_content/pages/bar.html'));
+        $app = $fs->getApp();
+        $baker = new PieCrustBaker($app);
+        $baker->setBakeDir($fs->url('counter'));
+        $baker->bake();
+
+        $structure = $fs->getStructure();
+        $counter = $structure[$fs->getRootName()]['counter'];
+        $this->assertEquals(
+            array('index.html', 'foo.html'),
+            $this->getVfsEntries($counter)
+        );
+    }
+
+    public function testPageDeletionByPagination()
+    {
+        $fs = MockFileSystem::create()
+            ->withConfig(array('site' => array(
+                'default_format' => 'none',
+                'posts_per_page' => 4
+            )))
+            ->withTemplate('default', '{{content|raw}}')
+            ->withTemplate('post', '{{content|raw}}')
+            ->withPost('post1', 1, 1, 2010, array(), 'POST ONE')
+            ->withPost('post2', 5, 2, 2010, array(), 'POST TWO')
+            ->withPost('post3', 10, 3, 2010, array(), 'POST THREE')
+            ->withPost('post4', 1, 4, 2010, array(), 'POST FOUR')
+            ->withPost('post5', 5, 5, 2010, array(), 'POST FIVE')
+            ->withPost('post6', 10, 6, 2010, array(), 'POST SIX')
+            ->withPost('post7', 15, 7, 2010, array(), 'POST SEVEN')
+            ->withPost('post8', 1, 8, 2010, array(), 'POST EIGHT')
+            ->withPost('post9', 5, 9, 2010, array(), 'POST NINE')
+            ->withPost('post10', 1, 10, 2010, array(), 'POST TEN')
+            ->withPage('_index', array(), <<<EOD
+{% for p in pagination.posts %}
+{{ p.title }}
+{% endfor %}
+EOD
+            )
+            ->withPage('foo', array(), <<<EOD
+{% for p in pagination.posts %}
+{{ p.title }}
+{% endfor %}
+EOD
+            );
+
+        $app = $fs->getApp();
+        $baker = new PieCrustBaker($app);
+        $baker->setBakeDir($fs->url('counter'));
+        $baker->bake();
+
+        $structure = $fs->getStructure();
+        $counter = $structure[$fs->getRootName()]['counter'];
+        $this->assertEquals(
+            array('2010', 'index.html', '2.html', '3.html', 'foo.html', 'foo'),
+            $this->getVfsEntries($counter)
+        );
+        $this->assertEquals(
+            array('2.html', '3.html'),
+            array_keys($counter['foo'])
+        );
+
+        $fs->withConfig(array('site' => array(
+            'default_format' => 'none',
+            'posts_per_page' => 11
+        )));
+        $app = $fs->getApp();
+        $baker = new PieCrustBaker($app);
+        $baker->setBakeDir($fs->url('counter'));
+        $baker->bake();
+
+        $structure = $fs->getStructure();
+        $counter = $structure[$fs->getRootName()]['counter'];
+        $this->assertEquals(
+            array('2010', 'index.html', 'foo.html', 'foo'),
+            $this->getVfsEntries($counter)
+        );
+        $this->assertEquals(
+            array(),
+            array_keys($counter['foo'])
+        );
+    }
+
+    private function getVfsEntries($structure)
+    {
+        $entries = array_keys($structure);
+        if (DIRECTORY_SEPARATOR == '\\')
+        {
+            // On Windows, there's a bug in PHP or vfsStream that creates
+            // an entry called '0' if you're creating a directory with the
+            // recursive version of 'mkdir' (passing 'true' as the 3rd parameter).
+            $zero = array_search(0, $entries, true);
+            if ($zero !== false)
+                array_splice($entries, $zero, 1);
+        }
+        return $entries;
     }
 }
 
